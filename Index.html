@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DEMa Sim - Simulador de Aciaria</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #1a202c;
+            color: #e2e8f0;
+            font-family: 'Inter', system-ui, sans-serif;
+            overflow: hidden;
+        }
+
+        /* Animação para destacar botões durante o tutorial */
+        @keyframes highlight-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7); border-color: #eab308; }
+            70% { box-shadow: 0 0 0 15px rgba(234, 179, 8, 0); border-color: #fef08a; }
+            100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0); border-color: #eab308; }
+        }
+        .tutorial-highlight {
+            animation: highlight-pulse 1.5s infinite;
+            border: 2px solid #eab308 !important;
+            z-index: 50;
+            position: relative;
+        }
+
+        .industrial-panel {
+            background: linear-gradient(145deg, #2d3748, #1a202c);
+            border: 1px solid #4a5568;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        .glow-red { text-shadow: 0 0 10px #f56565; }
+        .glow-blue { text-shadow: 0 0 10px #63b3ed; }
+
+        canvas {
+            image-rendering: pixelated;
+            background: #000;
+            border-radius: 8px;
+            cursor: crosshair;
+        }
+
+        .btn-control {
+            transition: all 0.2s;
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .btn-control:active {
+            transform: scale(0.95);
+        }
+        
+        .btn-control:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #temp-bar {
+            transition: width 0.3s ease-out, background-color 0.3s;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+    <!-- Cabeçalho -->
+    <header class="p-4 bg-gray-900 border-b border-gray-700 flex justify-between items-center z-10">
+        <div>
+            <h1 class="text-2xl font-black text-orange-500 italic">DEMa <span class="text-gray-400 font-light">SIM</span></h1>
+            <p class="text-xs text-gray-500">Módulo: Forno a Arco Elétrico (EAF)</p>
+        </div>
+        <div class="flex gap-6">
+            <div class="text-right">
+                <p class="text-xs text-gray-400">ESTADO DO SISTEMA</p>
+                <p id="system-status" class="text-sm font-mono text-green-400">STANDBY</p>
+            </div>
+            <div class="text-right border-l border-gray-700 pl-6">
+                <p class="text-xs text-gray-400">PRODUÇÃO TOTAL</p>
+                <p id="total-production" class="text-sm font-mono text-white">0 t</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- Overlay do Tutorial -->
+    <div id="tutorial-overlay" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-blue-900/95 border-2 border-blue-400 text-white p-6 rounded-xl shadow-[0_0_30px_rgba(59,130,246,0.5)] z-50 w-[600px] transition-all duration-500 backdrop-blur-sm">
+        <div id="tut-header" class="flex justify-between items-start mb-3 cursor-move p-2 -mt-2 -mx-2 hover:bg-blue-800/50 rounded transition-colors" title="Arraste para mover o tutorial">
+            <h3 id="tut-title" class="font-black text-2xl text-yellow-400 italic pointer-events-none">Bem-vindo à Aciaria! 🏭</h3>
+            <button onclick="tutorial.skip()" class="text-xs text-blue-300 hover:text-white underline z-10 relative cursor-pointer">Pular Tutorial</button>
+        </div>
+        <p id="tut-text" class="text-sm text-blue-100 leading-relaxed text-lg mb-4">
+            Aqui vamos transformar sucata velha em aço novo e limpo usando um Forno a Arco Elétrico. Como Engenheiro(a) de Materiais em treino, a sua missão é guiar este lote. Vamos começar?
+        </p>
+        <button id="tut-btn-next" onclick="tutorial.next()" class="bg-yellow-500 text-black px-6 py-2 rounded font-bold hover:bg-yellow-400 shadow-lg transform hover:scale-105 transition-all">
+            Iniciar Treino
+        </button>
+    </div>
+
+    <main class="flex-1 flex overflow-hidden">
+        <!-- Área da Simulação -->
+        <div class="flex-1 relative p-4 bg-black" id="canvas-container">
+            <canvas id="mainCanvas" class="w-full h-full shadow-2xl"></canvas>
+            
+            <!-- Overlay de Dados em Tempo Real -->
+            <div class="absolute top-8 left-8 space-y-4 pointer-events-none">
+                <div class="industrial-panel p-4 rounded-lg opacity-90">
+                    <p class="text-xs text-gray-400 uppercase">Temperatura do Banho</p>
+                    <p class="text-3xl font-mono font-bold text-orange-400"><span id="temp-display">25</span>°C</p>
+                    <div class="w-48 h-2 bg-gray-700 mt-2 rounded-full overflow-hidden">
+                        <div id="temp-bar" class="h-full bg-blue-500" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="industrial-panel p-4 rounded-lg opacity-90 flex gap-6">
+                    <div>
+                        <p class="text-xs text-gray-400 uppercase">Carbono (C)</p>
+                        <p id="carbon-display" class="text-2xl font-mono text-blue-300">4.20%</p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-gray-400 uppercase">Escória</p>
+                        <p id="slag-display" class="text-2xl font-mono text-yellow-500">0%</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Painel de Controlo Lateral -->
+        <aside class="w-80 industrial-panel p-6 flex flex-col gap-6 border-l border-gray-700 z-10 overflow-y-auto">
+            <h2 class="text-lg font-bold border-b border-gray-600 pb-2">CONSOLA DE OPERAÇÃO</h2>
+            
+            <div class="space-y-4">
+                <section>
+                    <label class="text-xs text-gray-400 block mb-2 font-bold uppercase tracking-widest">Etapa 1: Matéria-Prima</label>
+                    <button id="btn-scrap" onclick="actions.chargeScrap()" class="btn-control w-full py-3 bg-gray-600 hover:bg-gray-500 text-white rounded shadow-lg flex items-center justify-center gap-2 disabled:opacity-30">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        Carregar Sucata
+                    </button>
+                </section>
+
+                <section>
+                    <label class="text-xs text-gray-400 block mb-2 font-bold uppercase tracking-widest">Etapa 2: Energia</label>
+                    <button id="btn-power" onclick="actions.togglePower()" class="btn-control w-full py-3 bg-red-900/50 border border-red-500 text-red-400 hover:bg-red-500 hover:text-white rounded shadow-lg disabled:opacity-30">
+                        Ligar Arco Elétrico
+                    </button>
+                </section>
+
+                <section>
+                    <label class="text-xs text-gray-400 block mb-2 font-bold uppercase tracking-widest">Etapa 3: Refinação</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="btn-o2" onclick="actions.toggleOxygen()" class="btn-control p-2 bg-blue-900/50 border border-blue-500 text-blue-300 rounded text-xs hover:bg-blue-500 hover:text-white disabled:opacity-30">
+                            Sopro de O₂
+                        </button>
+                        <button id="btn-slag" onclick="actions.addSlag()" class="btn-control p-2 bg-yellow-900/50 border border-yellow-700 text-yellow-500 rounded text-xs hover:bg-yellow-700 hover:text-white disabled:opacity-30">
+                            Escorificantes
+                        </button>
+                    </div>
+                </section>
+
+                <section class="pt-4 border-t border-gray-700">
+                    <button id="btn-tap" onclick="actions.tapSteel()" class="btn-control w-full py-4 bg-orange-600 hover:bg-orange-500 text-white rounded-lg shadow-2xl text-lg font-black italic disabled:opacity-30">
+                        VAZAR AÇO
+                    </button>
+                </section>
+            </div>
+
+            <div class="mt-auto bg-black/40 p-4 rounded border border-gray-700">
+                <h3 class="text-xs text-gray-500 mb-2 uppercase flex justify-between">
+                    <span>Log de Eventos</span>
+                    <span id="log-counter" class="text-gray-600">0</span>
+                </h3>
+                <div id="event-log" class="text-[10px] font-mono space-y-2 h-32 overflow-y-auto text-gray-400 flex flex-col-reverse">
+                    <div>> Sistema inicializado. Aguardando carga.</div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // --- Configuração e Estado ---
+        const canvas = document.getElementById('mainCanvas');
+        const container = document.getElementById('canvas-container');
+        const ctx = canvas.getContext('2d');
+        const log = document.getElementById('event-log');
+        let logCount = 1;
+        
+        let state = {
+            temp: 25,
+            carbon: 4.2,
+            scrapLevel: 0,
+            liquidLevel: 0,
+            slagLevel: 0, // Nível de escória
+            isPowerOn: false,
+            isO2On: false, // Sopro contínuo de O2
+            isTapping: false,
+            phase: 'IDLE', // IDLE, CHARGING_DONE, MELTING, TAPPING
+            totalTons: 0,
+            sparks: [],
+            scrapPieces: [] // Matriz estática para evitar cintilação visual
+        };
+
+        // --- Sistema do Tutorial ---
+        const tutorial = {
+            isActive: true,
+            step: 0,
+            elements: {
+                box: document.getElementById('tutorial-overlay'),
+                title: document.getElementById('tut-title'),
+                text: document.getElementById('tut-text'),
+                btnNext: document.getElementById('tut-btn-next'),
+                controls: ['btn-scrap', 'btn-power', 'btn-o2', 'btn-slag', 'btn-tap']
+            },
+            
+            stepsData: [
+                { // 0
+                    title: "Bem-vindo à Aciaria! 🏭",
+                    text: "Aqui vamos transformar sucata velha em aço novo e limpo usando um Forno a Arco Elétrico. Como Engenheiro(a) de Materiais em treino, a sua missão é guiar este lote. Vamos começar?",
+                    action: "next_btn",
+                    highlight: null
+                },
+                { // 1
+                    title: "1. A Matéria-Prima",
+                    text: "O aço é o material mais reciclado do mundo! A nossa matéria-prima é a <b>Sucata</b>. <br><br>👉 Clique no botão <b>CARREGAR SUCATA</b> para colocar 120 toneladas de metal sólido no forno.",
+                    action: "wait_for_action",
+                    highlight: 'btn-scrap'
+                },
+                { // 2
+                    title: "2. Gerando Plasma",
+                    text: "Para derreter essa montanha de ferro, precisamos de muita energia. <br><br>👉 Clique em <b>LIGAR ARCO ELÉTRICO</b>. Eletrodos de grafite vão descer e criar um arco de plasma a mais de 3000°C!",
+                    action: "wait_for_action",
+                    highlight: 'btn-power'
+                },
+                { // 3
+                    title: "3. Fusão Termodinâmica",
+                    text: "Excelente! O arco está ligado. O ferro derrete a cerca de <b>1538°C</b>.<br><br>Aguarde enquanto a temperatura sobe. Observe a sucata absorver calor e transformar-se no 'banho' (metal líquido laranja).",
+                    action: "wait_for_melt",
+                    highlight: null
+                },
+                { // 4
+                    title: "4. Engenharia da Escória",
+                    text: "Banho 100% líquido! Mas se deixarmos o metal exposto, ele perde calor e oxida. <br><br>👉 Clique em <b>ESCORIFICANTES</b>. Isso adiciona calcário, formando uma 'Escória' (capa protetora flutuante) que também limpa as impurezas.",
+                    action: "wait_for_action",
+                    highlight: 'btn-slag'
+                },
+                { // 5
+                    title: "5. Refinação (Descarbonetação)",
+                    text: "A sucata costuma vir com muito Carbono. O aço precisa de menos de <b>0.5% de Carbono</b> para ser maleável.<br><br>👉 Clique em <b>SOPRO DE O₂</b>. O oxigénio vai reagir com o carbono (formando gás CO) e gerar ainda mais calor exotericamente!",
+                    action: "wait_for_carbon",
+                    highlight: 'btn-o2'
+                },
+                { // 6
+                    title: "6. Hora do Vazamento!",
+                    text: "Perfeito! A temperatura está ideal (~1620°C) e o carbono caiu.<br><br>👉 Clique em <b>SOPRO DE O₂</b> novamente para parar a lança.<br>👉 Depois, clique em <b>VAZAR AÇO</b> para esvaziar o forno e concluir o lote.",
+                    action: "wait_for_tap",
+                    highlight: 'btn-tap'
+                },
+                { // 7
+                    title: "Parabéns, Engenheiro(a)! 🎓",
+                    text: "Você completou o seu primeiro lote! Agora entende o ciclo básico: <b>Carregar, Derreter, Refinar e Vazar</b>.<br><br>O modo livre está desbloqueado. Divirta-se a produzir aço!",
+                    action: "finish",
+                    highlight: null
+                }
+            ],
+
+            updateUI() {
+                if (!this.isActive) return;
+                
+                const current = this.stepsData[this.step];
+                this.elements.title.innerHTML = current.title;
+                this.elements.text.innerHTML = current.text;
+                
+                // Mostrar/Ocultar botão de "Avançar"
+                if (current.action === "next_btn" || current.action === "finish") {
+                    this.elements.btnNext.style.display = "block";
+                    this.elements.btnNext.innerText = current.action === "finish" ? "Encerrar Tutorial" : "Próximo Passo";
+                } else {
+                    this.elements.btnNext.style.display = "none";
+                }
+
+                // Bloquear botões não permitidos e destacar o alvo
+                this.elements.controls.forEach(id => {
+                    const btn = document.getElementById(id);
+                    btn.classList.remove('tutorial-highlight');
+                    
+                    if (this.isActive) {
+                        // Se há um alvo específico e não é este botão, desativa-o
+                        if (current.highlight && current.highlight !== id) {
+                            btn.disabled = true;
+                        } 
+                        // Exceção: No passo 6, precisamos desligar o O2 e depois Vazar
+                        else if (this.step === 6 && id === 'btn-o2') {
+                            btn.disabled = false;
+                        }
+                        else {
+                            btn.disabled = false;
+                            if (current.highlight === id) {
+                                btn.classList.add('tutorial-highlight');
+                            }
+                        }
+                    } else {
+                        btn.disabled = false;
+                    }
+                });
+            },
+
+            next() {
+                if (this.step === this.stepsData.length - 1) {
+                    this.skip();
+                    return;
+                }
+                this.step++;
+                this.updateUI();
+            },
+
+            skip() {
+                this.isActive = false;
+                this.elements.box.style.display = 'none';
+                this.elements.controls.forEach(id => {
+                    const btn = document.getElementById(id);
+                    btn.classList.remove('tutorial-highlight');
+                    btn.disabled = false;
+                });
+                addLog("Modo livre ativado. Operação manual recomendada.", 'info');
+            },
+
+            checkProgress() {
+                if (!this.isActive) return;
+
+                // Verificações lógicas para avançar o tutorial automaticamente
+                if (this.step === 1 && state.phase === 'CHARGING_DONE') {
+                    this.next();
+                }
+                else if (this.step === 2 && state.isPowerOn) {
+                    this.next();
+                }
+                else if (this.step === 3 && state.scrapLevel <= 0 && state.liquidLevel >= 1.0) {
+                    this.next();
+                }
+                else if (this.step === 4 && state.slagLevel > 0) {
+                    this.next();
+                }
+                else if (this.step === 5 && state.isO2On && state.carbon <= 0.5) {
+                    // Forçar O2 a não desligar antes do tempo
+                    document.getElementById('btn-o2').disabled = true; 
+                    if(state.carbon <= 0.5) {
+                        document.getElementById('btn-o2').disabled = false;
+                        this.next();
+                    }
+                }
+                else if (this.step === 6 && state.isTapping) {
+                    this.next();
+                }
+            }
+        };
+
+
+        const CONSTANTS = {
+            MELTING_POINT: 1538,
+            MAX_TEMP: 1800,
+            TARGET_TEMP: 1620,
+            POWER_STEP: 1.5,
+            O2_CARBON_REDUCTION: 0.003,
+            O2_HEAT_BOOST: 1.0,
+            TAPPING_SPEED: 0.004
+        };
+
+        function addLog(msg, type = 'info') {
+            const div = document.createElement('div');
+            let colorClass = 'text-gray-400';
+            if(type === 'warn') colorClass = 'text-yellow-400';
+            if(type === 'err') colorClass = 'text-red-400';
+            if(type === 'success') colorClass = 'text-green-400';
+            
+            div.className = colorClass;
+            div.innerText = `> ${msg}`;
+            log.prepend(div);
+            
+            logCount++;
+            document.getElementById('log-counter').innerText = logCount;
+        }
+
+        // --- Lógica de Ação ---
+        const actions = {
+            chargeScrap() {
+                if (state.phase === 'IDLE') {
+                    state.phase = 'CHARGING_DONE';
+                    state.scrapLevel = 1.0;
+                    state.liquidLevel = 0.0;
+                    state.slagLevel = 0.0;
+                    state.carbon = 4.2;
+                    state.temp = Math.max(state.temp, 25);
+                    
+                    // Gerar peças de sucata para renderização estática
+                    state.scrapPieces = [];
+                    for(let i=0; i<60; i++) {
+                        state.scrapPieces.push({
+                            x: (Math.random() - 0.5) * 280,
+                            y: (Math.random() - 0.5) * 100 + 50, // Posição relativa ao fundo
+                            width: 15 + Math.random() * 30,
+                            height: 10 + Math.random() * 20,
+                            color: `hsl(210, 10%, ${30 + Math.random() * 30}%)`
+                        });
+                    }
+                    
+                    addLog("Sucata carregada: 120 Toneladas.", 'success');
+                } else {
+                    addLog("O forno já contém carga ou está em operação.", 'warn');
+                }
+            },
+            togglePower() {
+                if (state.scrapLevel <= 0 && state.liquidLevel <= 0) {
+                    addLog("ERRO: Forno vazio! Risco de danificar o refratário.", 'err');
+                    return;
+                }
+                if (state.isTapping) return;
+
+                state.isPowerOn = !state.isPowerOn;
+                const btn = document.getElementById('btn-power');
+                if (state.isPowerOn) {
+                    btn.classList.replace('bg-red-900/50', 'bg-green-600');
+                    btn.classList.replace('text-red-400', 'text-white');
+                    btn.innerText = "Cortar Energia";
+                    addLog("Arco Elétrico ativado. Consumo: 45MW.", 'warn');
+                } else {
+                    btn.classList.replace('bg-green-600', 'bg-red-900/50');
+                    btn.classList.replace('text-white', 'text-red-400');
+                    btn.innerText = "Ligar Arco Elétrico";
+                    addLog("Energia desligada.");
+                }
+            },
+            toggleOxygen() {
+                if (state.liquidLevel < 0.2) {
+                    addLog("ERRO: Necessário banho líquido para injetar O2.", 'err');
+                    return;
+                }
+                state.isO2On = !state.isO2On;
+                const btn = document.getElementById('btn-o2');
+                if (state.isO2On) {
+                    btn.classList.replace('bg-blue-900/50', 'bg-blue-500');
+                    btn.classList.replace('text-blue-300', 'text-white');
+                    addLog("Lança de O2 ativada. Descarbonetação iniciada.", 'warn');
+                } else {
+                    btn.classList.replace('bg-blue-500', 'bg-blue-900/50');
+                    btn.classList.replace('text-white', 'text-blue-300');
+                    addLog("Sopro de O2 interrompido.");
+                }
+            },
+            addSlag() {
+                if (state.liquidLevel > 0 || state.scrapLevel > 0) {
+                    if (state.slagLevel < 1.0) {
+                        state.slagLevel = Math.min(1.0, state.slagLevel + 0.25);
+                        addLog("Adição de cal e dolomia. Escória a formar-se.", 'success');
+                    } else {
+                        addLog("Volume máximo de escória atingido.", 'warn');
+                    }
+                } else {
+                    addLog("Carregue o forno primeiro.", 'err');
+                }
+            },
+            tapSteel() {
+                if (state.temp < CONSTANTS.MELTING_POINT) {
+                    addLog("ERRO: Metal sólido. Aumente a temperatura!", 'err');
+                    return;
+                }
+                if (state.liquidLevel < 0.1 && state.scrapLevel > 0) {
+                    addLog("ERRO: Fusão incompleta. Ainda há sucata sólida!", 'err');
+                    return;
+                }
+                if (state.liquidLevel <= 0) return;
+
+                // Desligar sistemas para vazamento
+                if(state.isPowerOn) this.togglePower();
+                if(state.isO2On) this.toggleOxygen();
+                
+                state.isTapping = true;
+                addLog("Iniciando vazamento por EBT (Eccentric Bottom Tapping)...", 'success');
+            }
+        };
+
+        // --- Sistema de Partículas ---
+        function createSpark(xPos, color = null) {
+            state.sparks.push({
+                x: xPos + (Math.random() - 0.5) * 40,
+                y: canvas.height/2 - 20,
+                vx: (Math.random() - 0.5) * 12,
+                vy: -Math.random() * 10 - 5,
+                life: 1.0,
+                color: color || (Math.random() > 0.5 ? '#63b3ed' : '#ffffff')
+            });
+        }
+
+        // --- Loop de Simulação (Lógica Física) ---
+        function update() {
+            // Arrefecimento Natural (Escória atua como isolante)
+            const coolingRate = state.slagLevel > 0.5 ? 0.05 : 0.15;
+            if (!state.isPowerOn && !state.isO2On) {
+                state.temp = Math.max(25, state.temp - coolingRate);
+            }
+
+            // Energia e Temperatura
+            if (state.isPowerOn) {
+                state.temp = Math.min(CONSTANTS.MAX_TEMP, state.temp + CONSTANTS.POWER_STEP);
+                if (Math.random() > 0.5) {
+                    createSpark(canvas.width/2 - 30); // Eletrodo 1
+                    createSpark(canvas.width/2 + 30); // Eletrodo 2
+                }
+            }
+
+            // Sopro de Oxigénio (Exotérmico e consome carbono)
+            if (state.isO2On) {
+                if (state.carbon > 0.05) {
+                    state.carbon = Math.max(0.02, state.carbon - CONSTANTS.O2_CARBON_REDUCTION);
+                    state.temp = Math.min(CONSTANTS.MAX_TEMP, state.temp + CONSTANTS.O2_HEAT_BOOST);
+                    if (Math.random() > 0.3) createSpark(canvas.width/2, '#ed8936'); // Faíscas laranja/fogo
+                } else {
+                    addLog("Nível de Carbono crítico. Sopro de O2 desligado automaticamente.", 'warn');
+                    actions.toggleOxygen();
+                }
+            }
+
+            // Fusão da Sucata
+            if (state.temp > CONSTANTS.MELTING_POINT && state.scrapLevel > 0) {
+                let meltRate = 0.002;
+                state.scrapLevel -= meltRate;
+                state.liquidLevel += meltRate;
+                
+                if (state.scrapLevel < 0) {
+                    state.scrapLevel = 0;
+                    state.liquidLevel = 1.0;
+                    addLog("Fusão completa. Banho 100% líquido.", 'success');
+                }
+
+                // Removemos peças de sucata visualmente de forma proporcional
+                const expectedPieces = Math.floor(state.scrapLevel * 60);
+                while(state.scrapPieces.length > expectedPieces) {
+                    state.scrapPieces.pop();
+                }
+            }
+
+            // Vazamento (Tapping)
+            if (state.isTapping) {
+                state.liquidLevel -= CONSTANTS.TAPPING_SPEED;
+                state.slagLevel -= CONSTANTS.TAPPING_SPEED * 0.5; // Escória vaza junto, mas devagar
+                if (state.slagLevel < 0) state.slagLevel = 0;
+
+                if (state.liquidLevel <= 0) {
+                    state.liquidLevel = 0;
+                    state.slagLevel = 0;
+                    state.isTapping = false;
+                    state.phase = 'IDLE';
+                    state.totalTons += 120;
+                    addLog("Vazamento concluído. Panela de aço enviada para o Forno Panela (LF).", 'success');
+                    document.getElementById('total-production').innerText = `${state.totalTons} t`;
+                }
+            }
+
+            // UI Update (DOM)
+            document.getElementById('temp-display').innerText = Math.floor(state.temp);
+            
+            // Cor da barra de temperatura baseada na temperatura real do aço
+            const tempBar = document.getElementById('temp-bar');
+            let progress = (state.temp / CONSTANTS.MAX_TEMP) * 100;
+            tempBar.style.width = `${progress}%`;
+            
+            if (state.temp < 1000) tempBar.className = "h-full bg-blue-500";
+            else if (state.temp < CONSTANTS.MELTING_POINT) tempBar.className = "h-full bg-yellow-500";
+            else if (state.temp < CONSTANTS.TARGET_TEMP) tempBar.className = "h-full bg-orange-500";
+            else tempBar.className = "h-full bg-red-600"; // Temperatura ideal ou acima
+
+            document.getElementById('carbon-display').innerText = `${state.carbon.toFixed(2)}%`;
+            document.getElementById('slag-display').innerText = `${Math.floor(state.slagLevel * 100)}%`;
+            
+            let statusText = "STANDBY";
+            if (state.isPowerOn) statusText = "AQUECIMENTO (ARCO)";
+            else if (state.isO2On) statusText = "REFINAÇÃO (O2)";
+            else if (state.isTapping) statusText = "VAZAMENTO (TAP)";
+            else if (state.phase === 'CHARGING_DONE') statusText = "CARREGADO";
+            
+            document.getElementById('system-status').innerText = statusText;
+            document.getElementById('system-status').className = `text-sm font-mono ${state.isPowerOn || state.isO2On ? 'text-red-400' : 'text-green-400'}`;
+
+            // Controlos UI - Só aplicar regras normais se tutorial estiver desligado
+            if (!tutorial.isActive) {
+                document.getElementById('btn-scrap').disabled = state.phase !== 'IDLE';
+            }
+
+            // Verifica progresso do tutorial a cada frame
+            tutorial.checkProgress();
+        }
+
+        // --- Renderização no Canvas ---
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2 + 30;
+            const furnaceRadius = 180;
+
+            // 1. Carcaça Externa do Forno
+            ctx.fillStyle = '#2d3748';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, furnaceRadius, 0, Math.PI, false);
+            ctx.lineTo(centerX - furnaceRadius, centerY - 120);
+            ctx.lineTo(centerX + furnaceRadius, centerY - 120);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.strokeStyle = '#4a5568';
+            ctx.lineWidth = 10;
+            ctx.stroke();
+
+            // --- INÍCIO CLIPPING AREA (Apenas desenhar dentro do forno) ---
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, furnaceRadius - 5, 0, Math.PI, false);
+            ctx.lineTo(centerX - furnaceRadius + 5, centerY - 120);
+            ctx.lineTo(centerX + furnaceRadius - 5, centerY - 120);
+            ctx.closePath();
+            ctx.clip();
+
+            const maxLiquidHeight = furnaceRadius; 
+            const currentLiquidHeight = maxLiquidHeight * state.liquidLevel;
+            const liquidY = centerY + furnaceRadius - currentLiquidHeight;
+
+            // 2. Metal Líquido (Retângulo que sobe a partir do fundo)
+            if (state.liquidLevel > 0) {
+                let liquidColor = '#4a5568';
+                if (state.temp > 1000 && state.temp <= 1400) liquidColor = '#c05621';
+                else if (state.temp > 1400) liquidColor = '#ed8936';
+
+                ctx.fillStyle = liquidColor;
+                ctx.fillRect(centerX - furnaceRadius, liquidY, furnaceRadius * 2, currentLiquidHeight);
+            }
+
+            // 3. Camada de Escória (Slag - Fica por cima do metal líquido)
+            if (state.slagLevel > 0 && state.liquidLevel > 0) {
+                const slagThickness = 30 * state.slagLevel;
+                ctx.fillStyle = '#975a16'; // Castanho alaranjado
+                ctx.fillRect(centerX - furnaceRadius, liquidY - slagThickness, furnaceRadius * 2, slagThickness);
+                
+                // Textura da escória (bolhas)
+                ctx.fillStyle = '#744210';
+                for(let i=0; i<20 * state.slagLevel; i++) {
+                    ctx.beginPath();
+                    ctx.arc(centerX - furnaceRadius + Math.random()*(furnaceRadius*2), liquidY - Math.random()*slagThickness, 3 + Math.random()*5, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            }
+
+            // 4. Sucata Sólida
+            if (state.scrapLevel > 0) {
+                // As peças de sucata descem conforme a base derrete
+                const baseHeight = state.liquidLevel > 0 ? liquidY : centerY + furnaceRadius - 20;
+                
+                state.scrapPieces.forEach(p => {
+                    ctx.fillStyle = p.color;
+                    ctx.strokeStyle = '#1a202c';
+                    ctx.lineWidth = 1;
+                    
+                    // Desenha os pedaços baseados no eixo Y relativo à poça ou fundo
+                    ctx.fillRect(centerX + p.x, baseHeight - p.y, p.width, p.height);
+                    ctx.strokeRect(centerX + p.x, baseHeight - p.y, p.width, p.height);
+                });
+            }
+            
+            // FIM CLIPPING AREA
+            ctx.restore();
+
+            // Efeito visual de Glow para temperaturas altas
+            if (state.temp > 1400 && (state.liquidLevel > 0 || state.scrapLevel > 0)) {
+                ctx.globalAlpha = (state.temp - 1400) / 400 * 0.3; // max 0.3 opacidade
+                const grd = ctx.createRadialGradient(centerX, centerY, 50, centerX, centerY, 200);
+                grd.addColorStop(0, '#ed8936');
+                grd.addColorStop(1, 'transparent');
+                ctx.fillStyle = grd;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, 200, 0, Math.PI, false);
+                ctx.fill();
+                ctx.globalAlpha = 1.0;
+            }
+
+            // 5. Eletrodos (Descem quando ligados)
+            const electrodeY = state.isPowerOn ? centerY - 50 : centerY - 120;
+            ctx.fillStyle = '#1a202c'; // Eletrodos de grafite (escuros)
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            
+            for (let i = -1; i <= 1; i+=2) { // 2 Eletrodos principais visíveis 2D
+                const ex = centerX + i * 40;
+                ctx.fillRect(ex - 15, 0, 30, electrodeY);
+                ctx.strokeRect(ex - 15, 0, 30, electrodeY);
+                
+                if (state.isPowerOn) {
+                    // Arco Elétrico
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#63b3ed';
+                    ctx.lineWidth = 4;
+                    ctx.moveTo(ex, electrodeY);
+                    ctx.lineTo(ex + (Math.random()-0.5)*30, electrodeY + 30 + Math.random()*30);
+                    ctx.stroke();
+                    
+                    // Glow do arco
+                    ctx.shadowBlur = 20;
+                    ctx.shadowColor = '#4299e1';
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+            }
+            
+            // 6. Lança de Oxigénio (Injetor)
+            if (state.isO2On) {
+                const lanceX = centerX + 120;
+                ctx.fillStyle = '#718096';
+                // Lança inserida no banho
+                ctx.fillRect(lanceX - 5, 0, 10, centerY); 
+                
+                // Jato de O2 / Fogo
+                ctx.fillStyle = '#ed8936';
+                ctx.beginPath();
+                ctx.moveTo(lanceX - 10, centerY);
+                ctx.lineTo(lanceX + 10, centerY);
+                ctx.lineTo(lanceX, centerY + 40);
+                ctx.fill();
+            }
+
+            // 7. Partículas (Faíscas)
+            state.sparks.forEach((p, index) => {
+                ctx.globalAlpha = Math.max(0, p.life);
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2.5, 0, Math.PI*2);
+                ctx.fill();
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.4; // Gravidade
+                p.life -= 0.015; // Velocidade de desaparecimento
+                
+                // Colisão com o chão (fundo da tela) para bounce
+                if(p.y > canvas.height - 10) {
+                    p.y = canvas.height - 10;
+                    p.vy *= -0.5;
+                }
+
+                if (p.life <= 0) state.sparks.splice(index, 1);
+            });
+            ctx.globalAlpha = 1.0;
+
+            // 8. Animação de Vazamento (EBT Taphole Stream)
+            if (state.isTapping) {
+                const streamWidth = 15 + (Math.random() * 5); // Fluxo instável
+                const tapX = centerX; 
+                const tapY = centerY + furnaceRadius; // Fundo do forno
+
+                // Jato de aço líquido a cair
+                ctx.fillStyle = '#f6ad55';
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#ed8936';
+                ctx.fillRect(tapX - streamWidth/2, tapY, streamWidth, canvas.height - tapY - 40);
+                ctx.shadowBlur = 0;
+
+                // Panela recetora (Ladle)
+                ctx.fillStyle = '#2d3748';
+                ctx.beginPath();
+                ctx.arc(tapX, canvas.height - 20, 50, 0, Math.PI, false);
+                ctx.fill();
+                ctx.fillRect(tapX - 50, canvas.height - 60, 100, 40);
+                
+                // Faíscas de respingo do vazamento
+                if(Math.random() > 0.5) createSpark(tapX, '#f6ad55');
+            }
+        }
+
+        // --- Loop Principal ---
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        // --- Eventos de Janela ---
+        function resizeCanvas() {
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        
+        // Inicialização
+        resizeCanvas();
+        tutorial.updateUI(); // Iniciar UI do tutorial
+        loop();
+
+        // --- Drag and Drop do Tutorial ---
+        const tutOverlay = document.getElementById('tutorial-overlay');
+        const tutHeader = document.getElementById('tut-header');
+        
+        let isDragging = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        tutHeader.addEventListener('mousedown', (e) => {
+            if (e.target.tagName === 'BUTTON') return; // Não arrastar se clicar no botão de pular
+            isDragging = true;
+            
+            // Remover classes de transição/posicionamento que atrapalham o drag rápido
+            tutOverlay.classList.remove('bottom-10', 'left-1/2', 'transform', '-translate-x-1/2', 'transition-all', 'duration-500');
+            
+            // Fixar tamanho e posição atual em pixels
+            const rect = tutOverlay.getBoundingClientRect();
+            tutOverlay.style.left = rect.left + 'px';
+            tutOverlay.style.top = rect.top + 'px';
+            tutOverlay.style.bottom = 'auto';
+            tutOverlay.style.right = 'auto';
+            
+            dragOffsetX = e.clientX - rect.left;
+            dragOffsetY = e.clientY - rect.top;
+            
+            tutHeader.style.cursor = 'grabbing';
+            document.body.style.userSelect = 'none'; // Previne selecionar texto durante o arraste
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            // Atualiza a posição da janela conforme o mouse move
+            tutOverlay.style.left = (e.clientX - dragOffsetX) + 'px';
+            tutOverlay.style.top = (e.clientY - dragOffsetY) + 'px';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                tutHeader.style.cursor = 'move';
+                document.body.style.userSelect = '';
+            }
+        });
+
+    </script>
+</body>
+</html>
