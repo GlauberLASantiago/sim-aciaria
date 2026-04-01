@@ -85,15 +85,15 @@
     </header>
 
     <!-- Overlay do Tutorial -->
-    <div id="tutorial-overlay" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-blue-900/95 border-2 border-blue-400 text-white p-6 rounded-xl shadow-[0_0_30px_rgba(59,130,246,0.5)] z-50 w-[600px] transition-all duration-500 backdrop-blur-sm">
-        <div id="tut-header" class="flex justify-between items-start mb-3 cursor-move p-2 -mt-2 -mx-2 hover:bg-blue-800/50 rounded transition-colors" title="Arraste para mover o tutorial">
-            <h3 id="tut-title" class="font-black text-2xl text-yellow-400 italic pointer-events-none">Bem-vindo à Aciaria! 🏭</h3>
+    <div id="tutorial-overlay" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-blue-900/95 border-2 border-blue-400 text-white p-4 rounded-xl shadow-[0_0_30px_rgba(59,130,246,0.5)] z-50 w-[400px] transition-all duration-500 backdrop-blur-sm">
+        <div id="tut-header" class="flex justify-between items-center mb-2 cursor-move p-1 -mt-1 -mx-1 hover:bg-blue-800/50 rounded transition-colors" title="Arraste para mover o tutorial">
+            <h3 id="tut-title" class="font-black text-xl text-yellow-400 italic pointer-events-none">Bem-vindo à Aciaria! 🏭</h3>
             <button onclick="tutorial.skip()" class="text-xs text-blue-300 hover:text-white underline z-10 relative cursor-pointer">Pular Tutorial</button>
         </div>
-        <p id="tut-text" class="text-sm text-blue-100 leading-relaxed text-lg mb-4">
+        <p id="tut-text" class="text-sm text-blue-100 leading-relaxed mb-4">
             Aqui vamos transformar sucata velha em aço novo e limpo usando um Forno a Arco Elétrico. Como Engenheiro(a) de Materiais em treino, a sua missão é guiar este lote. Vamos começar?
         </p>
-        <button id="tut-btn-next" onclick="tutorial.next()" class="bg-yellow-500 text-black px-6 py-2 rounded font-bold hover:bg-yellow-400 shadow-lg transform hover:scale-105 transition-all">
+        <button id="tut-btn-next" onclick="tutorial.next()" class="bg-yellow-500 text-black px-4 py-1.5 text-sm rounded font-bold hover:bg-yellow-400 shadow-lg transform hover:scale-105 transition-all">
             Iniciar Treino
         </button>
     </div>
@@ -124,6 +124,9 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Área de Notificações (Toasts) -->
+            <div id="notification-area" class="absolute top-8 right-8 flex flex-col gap-2 z-40 pointer-events-none items-end"></div>
         </div>
 
         <!-- Painel de Controlo Lateral -->
@@ -178,6 +181,123 @@
     </main>
 
     <script>
+        // --- Motor de Som (Web Audio API) ---
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContext();
+        
+        const sfx = {
+            arcOsc: null, arcNoise: null, arcGain: null,
+            o2Noise: null, o2Gain: null,
+            tapNoise: null, tapGain: null,
+
+            init() {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            },
+            createNoise() {
+                const bufferSize = audioCtx.sampleRate * 2;
+                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                const noise = audioCtx.createBufferSource();
+                noise.buffer = buffer;
+                noise.loop = true;
+                return noise;
+            },
+            playScrap() {
+                this.init();
+                // Som de impacto pesado (Grave)
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+                gain.gain.setValueAtTime(1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.6);
+
+                // Ruído de metal a colidir
+                const noise = this.createNoise();
+                const noiseGain = audioCtx.createGain();
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass'; filter.frequency.value = 1200;
+                noise.connect(filter).connect(noiseGain).connect(audioCtx.destination);
+                noiseGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+                noiseGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+                noise.start(); noise.stop(audioCtx.currentTime + 0.5);
+            },
+            toggleArc(isOn) {
+                this.init();
+                if (isOn) {
+                    // Zumbido 60Hz (Transformador)
+                    this.arcOsc = audioCtx.createOscillator();
+                    this.arcOsc.type = 'sawtooth';
+                    this.arcOsc.frequency.value = 60;
+                    
+                    // Ruído de faísca/plasma
+                    this.arcNoise = this.createNoise();
+                    const filter = audioCtx.createBiquadFilter();
+                    filter.type = 'bandpass'; filter.frequency.value = 2500;
+                    
+                    this.arcGain = audioCtx.createGain();
+                    this.arcGain.gain.value = 0.15;
+                    
+                    this.arcOsc.connect(this.arcGain);
+                    this.arcNoise.connect(filter).connect(this.arcGain);
+                    this.arcGain.connect(audioCtx.destination);
+                    
+                    this.arcOsc.start(); this.arcNoise.start();
+                } else {
+                    if (this.arcOsc) { this.arcOsc.stop(); this.arcNoise.stop(); }
+                }
+            },
+            toggleO2(isOn) {
+                this.init();
+                if (isOn) {
+                    this.o2Noise = this.createNoise();
+                    const filter = audioCtx.createBiquadFilter();
+                    filter.type = 'highpass'; filter.frequency.value = 2000;
+                    this.o2Gain = audioCtx.createGain();
+                    this.o2Gain.gain.value = 0.3;
+                    this.o2Noise.connect(filter).connect(this.o2Gain).connect(audioCtx.destination);
+                    this.o2Noise.start();
+                } else {
+                    if (this.o2Noise) { 
+                        this.o2Gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2); 
+                        setTimeout(() => this.o2Noise.stop(), 200); 
+                    }
+                }
+            },
+            playSlag() {
+                this.init();
+                const noise = this.createNoise();
+                const noiseGain = audioCtx.createGain();
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass'; filter.frequency.value = 500;
+                noise.connect(filter).connect(noiseGain).connect(audioCtx.destination);
+                noiseGain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+                noiseGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+                noise.start(); noise.stop(audioCtx.currentTime + 0.4);
+            },
+            toggleTap(isOn) {
+                this.init();
+                if (isOn) {
+                    this.tapNoise = this.createNoise();
+                    const filter = audioCtx.createBiquadFilter();
+                    filter.type = 'lowpass'; filter.frequency.value = 800;
+                    this.tapGain = audioCtx.createGain();
+                    this.tapGain.gain.value = 0;
+                    this.tapGain.gain.linearRampToValueAtTime(0.6, audioCtx.currentTime + 0.5);
+                    this.tapNoise.connect(filter).connect(this.tapGain).connect(audioCtx.destination);
+                    this.tapNoise.start();
+                } else {
+                    if (this.tapNoise) { 
+                        this.tapGain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+                        setTimeout(() => { if(this.tapNoise) this.tapNoise.stop(); this.tapNoise=null;}, 500);
+                    }
+                }
+            }
+        };
+
         // --- Configuração e Estado ---
         const canvas = document.getElementById('mainCanvas');
         const container = document.getElementById('canvas-container');
@@ -305,6 +425,7 @@
             },
 
             next() {
+                sfx.init(); // Permissão de áudio no clique
                 if (this.step === this.stepsData.length - 1) {
                     this.skip();
                     return;
@@ -314,6 +435,7 @@
             },
 
             skip() {
+                sfx.init(); // Permissão de áudio no clique
                 this.isActive = false;
                 this.elements.box.style.display = 'none';
                 this.elements.controls.forEach(id => {
@@ -378,12 +500,48 @@
             
             logCount++;
             document.getElementById('log-counter').innerText = logCount;
+
+            showNotification(msg, type);
+        }
+
+        // --- Sistema de Notificações (Toasts) ---
+        function showNotification(msg, type) {
+            const container = document.getElementById('notification-area');
+            if (!container) return;
+
+            const toast = document.createElement('div');
+            let bgClass = 'bg-gray-800/90 border-gray-600 text-gray-200';
+            let icon = 'ℹ️';
+            
+            if (type === 'success') { bgClass = 'bg-green-900/90 border-green-500 text-green-200'; icon = '✅'; }
+            if (type === 'warn') { bgClass = 'bg-yellow-900/90 border-yellow-500 text-yellow-200'; icon = '⚠️'; }
+            if (type === 'err') { bgClass = 'bg-red-900/90 border-red-500 text-red-200'; icon = '❌'; }
+
+            // Classes base do Tailwind com animação
+            toast.className = `px-4 py-3 rounded border shadow-[0_4px_12px_rgba(0,0,0,0.5)] transform transition-all duration-300 translate-x-10 opacity-0 flex items-center gap-3 text-xs font-bold backdrop-blur-sm max-w-xs ${bgClass}`;
+            toast.innerHTML = `<span class="text-lg">${icon}</span> <span>${msg}</span>`;
+            
+            container.appendChild(toast);
+
+            // Animar entrada (usamos duplo requestAnimationFrame para garantir que a transição CSS dispare após o elemento ser adicionado ao DOM)
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    toast.classList.remove('translate-x-10', 'opacity-0');
+                });
+            });
+
+            // Animar saída e remover do DOM após 3.5 segundos
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-x-10');
+                setTimeout(() => toast.remove(), 300); // Aguarda a transição CSS terminar
+            }, 3500);
         }
 
         // --- Lógica de Ação ---
         const actions = {
             chargeScrap() {
                 if (state.phase === 'IDLE') {
+                    sfx.playScrap();
                     state.phase = 'CHARGING_DONE';
                     state.scrapLevel = 1.0;
                     state.liquidLevel = 0.0;
@@ -428,6 +586,7 @@
                     btn.innerText = "Ligar Arco Elétrico";
                     addLog("Energia desligada.");
                 }
+                sfx.toggleArc(state.isPowerOn);
             },
             toggleOxygen() {
                 if (state.liquidLevel < 0.2) {
@@ -445,10 +604,12 @@
                     btn.classList.replace('text-white', 'text-blue-300');
                     addLog("Sopro de O2 interrompido.");
                 }
+                sfx.toggleO2(state.isO2On);
             },
             addSlag() {
                 if (state.liquidLevel > 0 || state.scrapLevel > 0) {
                     if (state.slagLevel < 1.0) {
+                        sfx.playSlag();
                         state.slagLevel = Math.min(1.0, state.slagLevel + 0.25);
                         addLog("Adição de cal e dolomia. Escória a formar-se.", 'success');
                     } else {
@@ -474,6 +635,7 @@
                 if(state.isO2On) this.toggleOxygen();
                 
                 state.isTapping = true;
+                sfx.toggleTap(true);
                 addLog("Iniciando vazamento por EBT (Eccentric Bottom Tapping)...", 'success');
             }
         };
@@ -552,6 +714,7 @@
                     state.totalTons += 120;
                     addLog("Vazamento concluído. Panela de aço enviada para o Forno Panela (LF).", 'success');
                     document.getElementById('total-production').innerText = `${state.totalTons} t`;
+                    sfx.toggleTap(false);
                 }
             }
 
